@@ -2,7 +2,6 @@
 This package bundles different scripts and tools for the application of the eigenvector continuation from few variational *ab initio* states, as discussed in our upcoming manuscript: Y. Rath and G. H. Booth. Interpolating many-body wave functions for accelerated molecular dynamics on near-exact electronic surfaces [1]
 
 
-
 ## Installation
 The project comes with a pyproject.toml.
 The utility functions from the [evcont](./evcont) folder can be installed from the main folder with
