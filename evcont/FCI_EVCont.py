@@ -82,8 +82,9 @@ class FCI_EVCont_obj:
         if lowrank:
             #self.truncation_style = kwargs['truncation_style']
             self.kwargs = kwargs
-            
-        # Diagonals of 2-cumulants ([nbra, nket, 3, norb, norb])
+
+        # Diagonals of 2-cumulants ([nbra, nket, 3, norb, norb])    
+        
         self.diagonal_lr = None 
         # Low rank eigendecomposition of the rest of 2-cumulant
         # Old version: dictionary[(nbra, nket)] = (vals_trunc, vecs_trunc)
@@ -95,8 +96,6 @@ class FCI_EVCont_obj:
     def vectorize_lowrank(self,hermitian=True):        
         vectorize_lowrank(self,hermitian=hermitian)
 
-    
-            
         
     def append_to_rdms(self, mol):
         """
@@ -161,7 +160,7 @@ class FCI_EVCont_obj:
                 e = e_all[ind]
                 
                 self.fcivecs.append(fcivec)
-        
+                
                 self.ens.append(e)
                 self.ens_nuc.append(mol.energy_nuc())
                 self.mol_index.append(mindex)
@@ -241,21 +240,21 @@ class FCI_EVCont_obj:
                         #vecs_lowrank[(i,n_cascis-1)] = lowrank_vecs_conj
                         self.vecs_lowrank[(i,new_ntrain-1)] = lowrank_vecs[0].conj(), lowrank_vecs[1].conj(), lowrank_vecs[2].conj(), use_joint
                         
-        
+                
                 self.overlap = overlap_new
                 self.one_rdm = one_rdm_new
                 if not self.lowrank:
                     self.two_rdm = two_rdm_new
                 else:
                     self.diagonal_lr = diagonal_lr_new
-
+        
     def prune_datapoints(self, keep_ids):
         """
         Prunes training points from the continuation object based on the given keep_ids.
 
         Args:
             keep_ids (list): List of indices to keep.
-
+                
         Returns:
             None
         """

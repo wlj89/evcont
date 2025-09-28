@@ -187,7 +187,8 @@ def converge_EVCont_MD(
         else:
             trajectory_out = None
             en_out = None
-
+            
+            
         trajectory = get_trajectory(
             init_mol.copy(),
             EVCont_obj.overlap,
@@ -459,7 +460,7 @@ def converge_EVCont_MD(
             updated_ens = np.ascontiguousarray(
                 np.genfromtxt("ens_EVCont_{}.xyz".format(i))[:, 1]
             )
-
+            
             if prune_irrelevant_data:
                 print("pruning irrelevant data points")
                 keep = np.ones(len(trn_times), dtype=bool)
