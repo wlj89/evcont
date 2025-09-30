@@ -22,7 +22,7 @@ def get_scanner(mol, one_rdm, two_rdm, overlap, hermitian=True):
     Returns a fake scanner object to compute MD trajectories with PySCF from
     an eigenvector continuation.
     """
-
+    
     class Base:
         converged = True
         ovlp = overlap
@@ -199,7 +199,7 @@ def converge_EVCont_MD(
             data_output=en_out,
             dt=dt,
         )
-
+        
         if rank == 0:
             trajectory_out.close()
             en_out.close()

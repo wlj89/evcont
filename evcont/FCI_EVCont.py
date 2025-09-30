@@ -87,7 +87,11 @@ class FCI_EVCont_obj:
         
         self.diagonal_lr = None 
         # Low rank eigendecomposition of the rest of 2-cumulant
+        
+        # for energy 
         # Old version: dictionary[(nbra, nket)] = (vals_trunc, vecs_trunc)
+
+        # for force 
         # New version: dictionary['vals': np.array([nbra, nket, nvec]),
         #                         'vecs': np.array([nbra, nket, nvec, nao, nao])]
         
@@ -129,7 +133,7 @@ class FCI_EVCont_obj:
         if nroots_train == 1:
             e_all = [e_all]
             fcivec_all = [fcivec_all]
-
+            
         # Transform to OAO basis
         if self.cibasis != 'OAO':
             S = mol.intor("int1e_ovlp")
@@ -189,7 +193,7 @@ class FCI_EVCont_obj:
                     if self.diagonal_lr is not None:
                         diagonal_lr_new[:-1, :-1, :, :, :] = self.diagonal_lr
                     
-                        
+                    
                 # Iterate over training states to add RDMs to the existing states
                 for i in range(len(self.fcivecs)):
                     ovlp = self.fcivecs[-1].flatten().conj().dot(self.fcivecs[i].flatten())
@@ -239,7 +243,7 @@ class FCI_EVCont_obj:
                         self.vecs_lowrank[(new_ntrain-1, i)] = lowrank_vecs[0], lowrank_vecs[1], lowrank_vecs[2], use_joint
                         #vecs_lowrank[(i,n_cascis-1)] = lowrank_vecs_conj
                         self.vecs_lowrank[(i,new_ntrain-1)] = lowrank_vecs[0].conj(), lowrank_vecs[1].conj(), lowrank_vecs[2].conj(), use_joint
-                        
+
                 
                 self.overlap = overlap_new
                 self.one_rdm = one_rdm_new

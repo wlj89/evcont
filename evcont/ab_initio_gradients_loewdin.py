@@ -1378,7 +1378,7 @@ def state_resolved_two_el_grad_lowrank(mol, lowrank_vecs, ED_builds, SVD_builds,
 @timeit
 def get_lowrank_en_with_grad_and_NAC(mol, one_RDM, S, lowrank_vecs, 
                                      diagonals=None, Jdiag_only=True, sao_diag=False,
-                                     nroots=1, 
+                                     nroots=1,
                                      density_fit=False, df_basis=None,
                                      ao_mo_trafo=None, ao_mo_trafo_grad=None,
                                      df_response=False,
@@ -1389,6 +1389,8 @@ def get_lowrank_en_with_grad_and_NAC(mol, one_RDM, S, lowrank_vecs,
     
     Input:
         mol (Mole object): pySCF mole object at the test geometry
+
+    The one you need for MD! 
         
     """
     ### Preliminaries
