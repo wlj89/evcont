@@ -82,7 +82,7 @@ def try_iterative_diag(mat, k, which='LM', use_svd=False, max_time=100000):
         else:
             print("[iterative] Success")
             return result
-
+        
     # Full fallback
     print("[full] Running full eigh/svds...")
     if not use_svd:

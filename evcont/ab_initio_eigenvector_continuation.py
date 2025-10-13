@@ -14,7 +14,7 @@ from evcont.low_rank_utils import lowrank_hamiltonian
 
 from pyscf.lib import safe_eigh
 
-def approximate_ground_state(h1, h2, one_RDM, two_RDM, S, hermitian=True):
+def approximate_ground_state(h1, h2, one_RDM, two_RDM, S, hermitian=True, lindep = 1e-5):
     """
     Returns the electronic ground state approximation from solving the generalised
     eigenvalue problem defined via the one- and two-body transition RDMs.
@@ -72,11 +72,16 @@ def approximate_ground_state(h1, h2, one_RDM, two_RDM, S, hermitian=True):
 
     else:
         assert False
+    
+    #print('H and S from ground state routine')
+    #print (H)
+    #print (S)
 
     if hermitian is True:
         # Solve the generalized eigenvalue problem for Hermitian Hamiltonian
         #vals, vecs = eigh(H, S)
-        vals, vecs, _ = safe_eigh(H, S)
+
+        vals, vecs, _ = safe_eigh(H, S, lindep = lindep)
     else:
         # Solve the generalized eigenvalue problem for non-Hermitian Hamiltonian
         vals, vecs = eig(H, S)
@@ -93,11 +98,14 @@ def approximate_ground_state(h1, h2, one_RDM, two_RDM, S, hermitian=True):
 
     return en_approx, gs_approx
 
-def solve_subspace(H, S, nroots=1, hermitian=True, lindep=1e-4):
+def solve_subspace(H, S, nroots=1, hermitian=True, lindep=1e-5):
     """
     Diagonalize the subspace Hamiltonian
     """
-
+    #print('H and S from multi state routine')
+    #print (H)
+    #print (S) 
+    
     if hermitian is True:
         # Solve the generalized eigenvalue problem for Hermitian Hamiltonian
         #vals, vecs = eigh(H, S)
@@ -115,7 +123,7 @@ def solve_subspace(H, S, nroots=1, hermitian=True, lindep=1e-4):
 
     # Find the index of the minimum GS eigenvalue
     argroots = np.argsort(vals[valid_vals].real)[:nroots]
-
+    
     # Get the energy approximation and ground state approximation
     en_approx = vals[valid_vals][argroots].real
     evec_approx = vecs[:, valid_vals][:, argroots].real.T
@@ -161,7 +169,7 @@ def approximate_multistate_lowrank(mol, one_RDM, lowrank_vecs, cum_diagonal, S,
 
     return en_approx, evec_approx
 
-def approximate_multistate(h1, h2, one_RDM, two_RDM, S, nroots=1, hermitian=True):
+def approximate_multistate(h1, h2, one_RDM, two_RDM, S, nroots=1, hermitian=True, lindep = 1e-5):
     """
     Returns multiple approximate electronic states from solving the generalised
     eigenvalue problem defined via the one- and two-body transition RDMs.
@@ -221,7 +229,7 @@ def approximate_multistate(h1, h2, one_RDM, two_RDM, S, nroots=1, hermitian=True
     else:
         assert False
     
-    en_approx, evec_approx = solve_subspace(H, S, nroots=nroots, hermitian=hermitian)
+    en_approx, evec_approx = solve_subspace(H, S, nroots=nroots, hermitian=hermitian, lindep=lindep)
 
     return en_approx, evec_approx
 
@@ -281,7 +289,7 @@ def approximate_multistate_otf(h1, h2, one_RDM=None, two_RDM=None, S=None, otf_h
     return en_approx, evec_approx
 
 
-def approximate_ground_state_OAO(mol, one_RDM, two_RDM, S, hermitian=True):
+def approximate_ground_state_OAO(mol, one_RDM, two_RDM, S, hermitian=True, lindep = 1e-5):
     """
     This function approximates the ground state energy and wavefunction of a given
     molecule from an eigenvector continuation with t-RDMS and the overlap matrix S.
@@ -309,7 +317,9 @@ def approximate_ground_state_OAO(mol, one_RDM, two_RDM, S, hermitian=True):
     h1, h2 = get_integrals(mol, get_basis(mol))
 
     # Approximate the ground state energy and wavefunction in projected subspace
-    en, vec = approximate_ground_state(h1, h2, one_RDM, two_RDM, S, hermitian=hermitian)
+    en, vec = approximate_ground_state(
+                    h1, h2, one_RDM, two_RDM, S, hermitian=hermitian, lindep=lindep, 
+                )
 
     # Calculate the total energy by adding the nuclear repulsion energy
     total_energy = en.real + mol.energy_nuc()
@@ -317,7 +327,7 @@ def approximate_ground_state_OAO(mol, one_RDM, two_RDM, S, hermitian=True):
     return total_energy, vec
 
 
-def approximate_multistate_OAO(mol, one_RDM, two_RDM, S, nroots=1, hermitian=True):
+def approximate_multistate_OAO(mol, one_RDM, two_RDM, S, nroots=1, hermitian=True, lindep = 1e-5):
     """
     This function approximates multiple state energies and wavefunctions of a given
     molecule from an eigenvector continuation with t-RDMS and the overlap matrix S.
@@ -347,7 +357,7 @@ def approximate_multistate_OAO(mol, one_RDM, two_RDM, S, nroots=1, hermitian=Tru
 
     # Approximate the ground state energy and wavefunction in projected subspace
     en, vec = approximate_multistate(
-        h1, h2, one_RDM, two_RDM, S, nroots=nroots, hermitian=hermitian
+        h1, h2, one_RDM, two_RDM, S, nroots=nroots, hermitian=hermitian, lindep=lindep, 
     )
 
     # Calculate the total energy by adding the nuclear repulsion energy

@@ -16,36 +16,13 @@ from threadpoolctl import threadpool_limits
 
 rank = MPI.COMM_WORLD.Get_rank()
 
-def get_center_of_mass(mol):
 
-    """
-        return center of mass coordinates 
-    """
-    
-    mass_sum = np.sum(mol.atom_mass_list())
-
-    com_coord = np.array([0.0 for i in mol.atom])
-
-    for i, mass in enumerate(mol.atom_mass_list()):
-
-        com_coord += mass * np.array(mol.atom[i][1])
-        
-    
-    com_coord /= mass_sum 
-    
-    return com_coord 
-    
-
-def get_scanner(mol, one_rdm, two_rdm, overlap, hermitian=True, calc_dipole = False,):
+def get_scanner(mol, one_rdm, two_rdm, overlap, hermitian=True):
     """
     Returns a fake scanner object to compute MD trajectories with PySCF from
     an eigenvector continuation.
-    
-    Lijun @ Aug 27, 2025 
-    * Added a few more lines to output the dipole moment time series 
-    
     """
-
+    
     class Base:
         converged = True
         ovlp = overlap
@@ -53,20 +30,15 @@ def get_scanner(mol, one_rdm, two_rdm, overlap, hermitian=True, calc_dipole = Fa
         two_trdm = two_rdm
         predicted_one_rdm = None
         predicted_two_rdm = None
-    
+
     class Scanner(lib.GradScanner):
         def __init__(self):
             self.mol = mol
             self.base = Base()
-            # self.converged = True 
-            
-            # for dipole calculation 
-            self.dipole_t = [] 
-            
+            # self.converged = True
 
         def __call__(self, mol):
             self.mol = mol
-            
             if one_rdm is not None and two_rdm is not None and overlap is not None:
                 en, grad, rdm_o, rdm_t = get_energy_with_grad(
                     mol,
@@ -76,63 +48,15 @@ def get_scanner(mol, one_rdm, two_rdm, overlap, hermitian=True, calc_dipole = Fa
                     hermitian=hermitian,
                     return_density_matrices=True,
                 )
-                
-                # they are in SAO basis! 
                 self.base.predicted_one_rdm = rdm_o
                 self.base.predicted_two_rdm = rdm_t
-                
-                # dipole calculation
-                if calc_dipole is True: 
-                    # notice that we are making an extra assumption here 
-                    self.add_dipole(mol=mol, rho = rdm_o)
-                    
                 return en, grad
             else:
                 return mol.energy_nuc(), grad.RHF(scf.RHF(mol)).grad_nuc()
-            
-        def add_dipole(self, mol, rho):
-            
-            """
-                rho: predicted 1rdm in SAO!!! 
-                rho_AO = S^{-1/2} @ rho_SAO @ S{-1/2}  
-                
-                By default, the origin of dipole moment is (0,0,0)  
-                Has to use the center of mass as origin to remove translational modes! 
-                
-                Unit: Debye 
-         
-            """
-            
-            from pyscf.scf.hf import dip_moment  
-            from functools import reduce
-            # for S^{-1/2}
-            
-            from evcont.electron_integral_utils import get_loewdin_trafo 
-            #print('calculating dipole moment...')
 
-            rhf = scf.RHF(mol).run() 
-            
-            # need a SAO->AO transformation 
-            # repalce C by S^{-1/2}  
-            
-            S = mol.intor_symmetric("int1e_ovlp") 
-            V = get_loewdin_trafo(S) 
-
-            rho_AO =  reduce(np.matmul, (V, rho, V))
-
-            # use center of mass as origin to remove translational modes 
-            origin_com = get_center_of_mass(mol)
-            #print('center of mass')
-            #print(origin_com)
-            
-            # an array 
-            dipole = dip_moment(mol=mol, dm=rho_AO, origin=origin_com)
-            
-            self.dipole_t.append(dipole.copy())
-            
     return Scanner()
 
-    
+
 def get_trajectory(
     init_mol,
     overlap,
@@ -143,11 +67,7 @@ def get_trajectory(
     init_veloc=None,
     hermitian=True,
     trajectory_output=None,
-    energy_output=None,
-    data_output = None, 
-    calc_dipole = False, 
-    dipole_output = False,
-    
+    data_output=None,
 ):
     """
     Helper function to compute an MD trajectory from eigenvector continuation with
@@ -166,18 +86,9 @@ def get_trajectory(
         trajectory_output: File to write the trajectory output. Default is None.
         energy_output: File to write the energy output. Default is None.
 
-        # Added on Aug 24 2025 by Lijun
-
-        data_output: path for energy output in pyscf.NVE 
-        calc_dipole: switch for dipole moment calculation 
-
-        also added center of mass routine to get rid of the translation mode in dipole moment
-        
-        
     Returns:
         trajectory: The calculated trajectory as a numpy array.
     """
-    
     trajectory = np.zeros((steps, len(init_mol.atom), 3))
 
     # Compute max number of threads we could use for the non-mpi-parallel part
@@ -191,16 +102,11 @@ def get_trajectory(
     if rank == 0:
         with threadpool_limits(limits=num_threads):
             scanner_fun = get_scanner(
-                init_mol, 
-                one_rdm, 
-                two_rdm, 
-                overlap, 
-                hermitian=hermitian, 
-                calc_dipole=calc_dipole
+                init_mol, one_rdm, two_rdm, overlap, hermitian=hermitian
             )
 
             frames = []
-            myintegrator = md.NVE( 
+            myintegrator = md.NVE(
                 scanner_fun,
                 dt=dt,
                 steps=steps,
@@ -208,27 +114,17 @@ def get_trajectory(
                 incore_anyway=True,
                 frames=frames,
                 trajectory_output=trajectory_output,
-                energy_output=energy_output,
-                data_output = data_output,
+                data_output=data_output,
                 verbose=0,
             )
-            
             myintegrator.run()
-            
             trajectory = np.array([frame.coord for frame in frames])
 
-            if calc_dipole is True:
-                #print (scanner_fun.dipole_t)
-                if dipole_output is None:
-                    dipole_output = 'dipole'
-                
-                np.save(dipole_output, scanner_fun.dipole_t )
-    
     MPI.COMM_WORLD.Bcast(trajectory, root=0)
 
     return trajectory
-    
-    
+
+
 def converge_EVCont_MD(
     EVCont_obj,
     init_mol,
@@ -238,7 +134,6 @@ def converge_EVCont_MD(
     prune_irrelevant_data=False,
     trn_times=[],
     data_addition="farthest_point_ham",
-
 ):
     """
     Helper function to converge the prediction of MD trajectories from EV continuation.
@@ -292,7 +187,8 @@ def converge_EVCont_MD(
         else:
             trajectory_out = None
             en_out = None
-
+            
+            
         trajectory = get_trajectory(
             init_mol.copy(),
             EVCont_obj.overlap,
@@ -300,10 +196,10 @@ def converge_EVCont_MD(
             EVCont_obj.two_rdm,
             steps=steps,
             trajectory_output=trajectory_out,
-            energy_output=en_out,
+            data_output=en_out,
             dt=dt,
         )
-
+        
         if rank == 0:
             trajectory_out.close()
             en_out.close()
@@ -350,7 +246,7 @@ def converge_EVCont_MD(
                 EVCont_obj.two_rdm,
                 steps=steps,
                 trajectory_output=trajectory_out,
-                energy_output=en_out,
+                data_output=en_out,
                 dt=dt,
             )
         else:
@@ -541,7 +437,7 @@ def converge_EVCont_MD(
             EVCont_obj.two_rdm,
             steps=steps,
             trajectory_output=trajectory_out,
-            energy_output=en_out,
+            data_output=en_out,
             dt=dt,
         )
 
@@ -564,7 +460,7 @@ def converge_EVCont_MD(
             updated_ens = np.ascontiguousarray(
                 np.genfromtxt("ens_EVCont_{}.xyz".format(i))[:, 1]
             )
-
+            
             if prune_irrelevant_data:
                 print("pruning irrelevant data points")
                 keep = np.ones(len(trn_times), dtype=bool)

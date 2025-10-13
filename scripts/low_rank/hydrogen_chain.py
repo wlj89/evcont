@@ -77,7 +77,7 @@ if fix_sym == None:
     mol_sym = False
 else:
     mol_sym = True
-    
+
 use_diag = True
 Jdiag_only = True # Only use diagonal corrections that contribute as J builds
 sao_diag = False # Diagonal inference in SAO basis
