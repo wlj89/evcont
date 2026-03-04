@@ -3,7 +3,7 @@
     w. (2RDM) low-rank option 
     
     TODO 
-        1. purfication  
+        1. purfication  (Done)
         
     L. Wang, Sep 2025
     
@@ -28,6 +28,7 @@ import numpy as np
 
 from ebcc import REBCC 
 
+
 class CCSD_EVCont_Obj:
 
         
@@ -36,16 +37,23 @@ class CCSD_EVCont_Obj:
                  comp_geom_mol,   # moleclue at comp. geom 
                  nroots = 1,      # num of roots. 
                  lowrank = False,  # low-rank rep. of 2RDM 
+                 comp_geom_list = None,  # for test only
+                 train_geom_list = None, # for test only 
                  purify = False, # 
                  **lr_kwargs         # for lowrank compression 
                  
                 ):
-
+        
         self.comp_geom_mol = comp_geom_mol 
         self.nelec = self.comp_geom_mol.nelectron  
         self.norb = self.comp_geom_mol.nao
 
+        self.comp_geom_list = comp_geom_list
+        self.train_geom_list = train_geom_list 
+        
+
         self.nroots = nroots
+        
         if self.nroots > 1:
             raise Exception('excited states continuation not supported')
         
@@ -70,6 +78,7 @@ class CCSD_EVCont_Obj:
         self.train_en = []  
         self.train_geom = [] 
         
+
         # lowrank paras 
         self.lowrank = lowrank 
         if self.lowrank is True:
@@ -88,6 +97,111 @@ class CCSD_EVCont_Obj:
             # val: (what ever is needed for Hmailtonian evaluation)  
             self.vecs_lowrank = {}  
 
+        # expansion coeff in SAO 
+        self.train_mol = [] 
+        
+    def append_to_rdms_pro(self, mol):
+
+        """
+            new RDM and tRDM routine using Procrustes orbitals
+
+            TODO: 
+                1. low rank 
+                2. 
+        """
+
+        rhf = self.get_RHF(mol)
+        N_occ = mol.nelec[0]
+        N_e = mol.nelectron
+
+        num_state = len(self.train_states)  
+
+        # CCSD in canonical MO 
+        ccsd = REBCC(rhf, ansatz="CCSD")    
+        ccsd.kernel()
+        ccsd.solve_lambda()    
+        
+        # diagonal rdm in MO
+        rdm1, rdm2 = ccsd.make_rdm1_f(hermitise=True), ccsd.make_rdm2_f(hermitise=True)   
+        
+        
+        # mo-to-sao 
+        U, _ = self.get_U_global(mol) 
+        
+        rdm1_sao = self.to_sao_1rdm(rdm1, U = U )
+        rdm2_sao = self.to_sao_2rdm(rdm2, U = U )
+
+        if num_state == 0: 
+            
+            self.two_rdm[0,0,:,:,:,:] = rdm2_sao.copy()  
+            self.one_rdm[0,0,:,:] = rdm1_sao.copy()  
+            
+        else: 
+            
+            # diagonal RDM 
+            one_rdm_old = self.one_rdm.copy()
+            two_rdm_old = self.two_rdm.copy()
+            ovlp_old = self.overlap.copy() 
+
+            self.two_rdm = np.zeros([num_state+1,]*2 + [self.norb,]*4 )
+            self.two_rdm[:num_state,:num_state, :,:,:,:] = two_rdm_old.copy()  
+            self.overlap = np.ones([num_state+1,num_state+1]) 
+
+            self.one_rdm = np.zeros([num_state+1,]*2 + [self.norb,]*2 )
+            self.one_rdm[:num_state,:num_state, :,:] = one_rdm_old.copy()  
+            self.overlap[:num_state, :num_state] = ovlp_old.copy() 
+
+            self.one_rdm[num_state, num_state, :, : ]  = rdm1_sao.copy() 
+            self.two_rdm[num_state, num_state, :, :, :, :]  = rdm2_sao.copy()  
+
+            # tRDM in Procrustes orbtials
+
+            for i in range(num_state):
+                
+                """
+                    trdm2_ab(ba)_sao is internally symmetrised via: 
+                    
+                    symmetrize_tRDM = lambda dm: 0.5 * (dm.transpose(0, 1, 2, 3) + dm.transpose(2,3,0,1))  
+
+                    i.e. two swaps 
+                """
+                U, _ = self.get_U_global(self.train_mol[i]) 
+
+                trdm1_ab_sao, trdm2_ab_sao = self.get_trdm_pro(self.train_states[i],
+                                                               ccsd,
+                                                               self.train_mol[i],
+                                                               mol, 
+                                                               # to SAO via A 
+                                                               U
+                                                               ) 
+                U, _ = self.get_U_global(mol)  
+                trdm1_ba_sao, trdm2_ba_sao = self.get_trdm_pro(ccsd,
+                                                               self.train_states[i], 
+                                                               mol, 
+                                                               self.train_mol[i],
+                                                               # to SAO via A 
+                                                               U 
+                                                               )    
+                
+                trdm1_ab_sym = 0.5 * (trdm1_ab_sao + trdm1_ba_sao.T) 
+
+                # averaging Γab and Γba 
+                self.one_rdm[i, num_state, :, : ] = trdm1_ab_sym 
+                self.one_rdm[num_state, i, :, : ] = np.einsum('pq->qp', trdm1_ab_sym.conj()) 
+
+                trdm2_ab_sym = 0.5 * (trdm2_ab_sao + np.einsum('pqrs->qpsr', trdm2_ba_sao))  
+                
+                self.two_rdm[i, num_state,:,:,:,:] = trdm2_ab_sym
+                self.two_rdm[num_state, i,:,:,:,:] = np.einsum('pqrs->qpsr', trdm2_ab_sym ) 
+                
+                # overlap 
+                self.overlap[i, num_state] = np.einsum('ii', trdm1_ab_sym) / (N_e) 
+                self.overlap[num_state, i] = self.overlap[i, num_state] 
+                
+        self.train_states.append(ccsd.copy())
+        self.train_mol.append(mol.copy())   
+        self.train_en.append(ccsd.e_tot)
+        
 
     def append_to_rdms(self, mol):
         """
@@ -101,25 +215,86 @@ class CCSD_EVCont_Obj:
                 * self.diagonal_lr 
 
             CCSD energy is required in reduce_2rdm
+
+            On basis transformation 
+
+            The expansion coefficient in a training geometry is given by 
+
+            $S(\mathbf{R})^{-1/2} S(\mathbf{R_c})^{1/2} C(\mathbf{R_c}) $ being the CO expansion coeff in AO basis 
         """
         
         """
             to MO-like basis and perform CCSD
         """ 
+        
+        from pyscf import cc
+        from numpy.linalg import eigh
+        
+        round = lambda x:np.round(x,7)
         rhf = self.get_RHF(mol) 
-        oao_coeff = get_basis(mol)
+
+        #print('Fock\'s diagonal in canoncial basis')
+        
+        S = mol.intor("int1e_ovlp") 
+
+        #print('eigenvalue of overlap matrix') 
+        #print (eigh(S)[0]) 
+
+        #print ('check orthogonality condition') 
+        #print (round(rhf.mo_coeff.T @ S @ rhf.mo_coeff))
+        
+        F_mo =  rhf.mo_coeff.T @ rhf.get_fock() @ rhf.mo_coeff
+
+        #print (np.diag(F_mo) ) 
+        
+        oao_coeff = get_basis(mol) 
         mo_like_coeff = np.einsum('ij,kj->ik',oao_coeff, self.U_global) 
         
-        rhf.mo_coeff = mo_like_coeff    
-        rhf.mo_occ = self.occ_global   
+        self.get_fock_comp(rhf,oao_coeff)  
         
-        ccsd = REBCC(rhf, ansatz="CCSD") 
+        #exit() 
+        
+        rhf.mo_coeff = mo_like_coeff
+        rhf.mo_occ = self.occ_global
+        
+        # needs level shift 
+
+        ccsd = REBCC(rhf, ansatz="CCSD")    
+        
         ccsd.kernel()
         ccsd.solve_lambda()     
-        
-        #ccsd_energy = ccsd.e_tot 
 
-        # diagonal rdm in pyscf convention 
+        # pyscf in canonical basis 
+        ccsd_pyscf_can = self.get_RHF(mol).CCSD()
+        #ccsd_pyscf_can.level_shift = 0.25 # Ha
+        ccsd_pyscf_can.kernel() 
+        
+        print ('energy from pyscf in canonical basis\n', ccsd_pyscf_can.e_tot) 
+        print ('t1 from pyscf in canonical basis\n', self.get_t1_diag(ccsd_pyscf_can.t1))
+        
+        # pyscf in comp basis 
+
+        ccsd_pyscf = cc.CCSD(rhf)
+        ccsd_pyscf.level_shift = 1.64
+        #ccsd_pyscf.iterative_damping = 5  
+        #ccsd_pyscf.diis_start_cycle = 1
+        #ccsd_pyscf.diis_space = 10
+
+        ccsd_pyscf.kernel() 
+        
+        #print(ccsd_pyscf.e_tot)   
+        
+        rdm1_pyscf = ccsd_pyscf.make_rdm1() 
+        rdm2_pyscf = ccsd_pyscf.make_rdm2()  
+
+        ccsd_pyscf_en = self.get_ccsd_comp_en(mol,
+                                              rhf,
+                                              rdm1_pyscf,rdm2_pyscf,mo_like_coeff)
+        
+        print('energy (rdm)from pyscf in comp basis\n', ccsd_pyscf_en) 
+        print('energy from pyscf in comp basis\n', ccsd_pyscf.e_tot)        
+        print ('t1 from pyscf in comp basis\n', self.get_t1_diag(ccsd_pyscf.t1))
+        # PYCSF RDM convention: z
         # $\Gamma_{pqrs} = \Braket{\hat{c}^\dagger_p\hat{c}^\dagger_r\hat{c}_s \hat{c}_q}$  
         rdm1, rdm2 = ccsd.make_rdm1_f(hermitise=True), ccsd.make_rdm2_f(hermitise=True)  
         
@@ -129,11 +304,13 @@ class CCSD_EVCont_Obj:
                                             rdm2,
                                             mo_like_coeff)
         
-        ccsd_energy = ccsd_en_rdm 
-                
-        """
-            need to make SAO transformation more consistent! 
-        """
+        ccsd_energy = ccsd_en_rdm   
+        
+        print('energy from ebcc\n', ccsd_en_rdm)
+        print('t1 from ebcc\n', self.get_t1_diag(ccsd.t1))
+
+        print('\n') 
+        
         num_state = len(self.train_states) 
 
         if self.lowrank is True: 
@@ -202,7 +379,7 @@ class CCSD_EVCont_Obj:
                 
                 self.two_rdm[0,0,:,:,:,:] = self.to_sao_2rdm(rdm2)
                 self.one_rdm[0,0,:,:] = self.to_sao_1rdm(rdm1)
-
+                
             else:   
                 
                 self.append_1rdm_and_ovlp(num_state, rdm1, ccsd)
@@ -233,8 +410,151 @@ class CCSD_EVCont_Obj:
         
     """
         below are less essential/helper routines 
-    """
+    """ 
+    
+    def get_trdm_pro(self, ccsd_A, ccsd_B, mol_A, mol_B, U ):
+        """
+            compute trdm via Procrustes orbitals
 
+            returns tRDM in SAO with all in-block symmetries enforced
+
+            A: bra 
+            B: ket  (whose amplitudes will be rotated ) 
+        """ 
+        
+        from evcont.ccsd_tRDM_utils import make_rdm1_f, make_rdm2_f 
+        
+        symmetrize_tRDM = lambda dm: 0.5 * (dm.transpose(0, 1, 2, 3) + dm.transpose(2,3,0,1)) 
+        
+        A = self.get_D(mol_A)
+        B = self.get_D(mol_B)
+
+        N_occ = mol_A.nelec[0]
+
+        Q_o = self.get_procrustes(A[:, :N_occ], B[:, :N_occ])
+        Q_v = self.get_procrustes(A[:, N_occ:], B[:, N_occ:]) 
+                
+
+        B_t1_pro = np.einsum('ia, ji, ba -> jb',
+                            ccsd_B.t1, 
+                            Q_o.T,
+                            Q_v.T,
+                            optimize = 'optimal')
+    
+        B_t2_pro = np.einsum('ijab, mi, nj, ca, db -> mncd', 
+                            ccsd_B.t2, 
+                            Q_o.T,
+                            Q_o.T, 
+                            Q_v.T, 
+                            Q_v.T,
+                            optimize = 'optimal') 
+        
+        # must transform back to SAO here 
+        tRDM1_AB = make_rdm1_f(
+                            l1a=ccsd_A.l1,
+                            l2a=ccsd_A.l2,
+                            t1a=ccsd_A.t1,
+                            t2a=ccsd_A.t2,
+                            t1b=B_t1_pro,
+                            t2b=B_t2_pro,
+                         )  
+    
+        tRDM2_AB = make_rdm2_f(
+                                l1a=ccsd_A.l1,
+                                l2a=ccsd_A.l2,
+                                t1a=ccsd_A.t1,
+                                t2a=ccsd_A.t2,
+                                t1b=B_t1_pro,
+                                t2b=B_t2_pro,
+                            ) 
+
+        tRDM1_AB_sao = self.to_sao_1rdm(tRDM1_AB, U = U)
+        
+        tRDM2_AB_sao = self.to_sao_2rdm(tRDM2_AB, U = U )
+        
+        return tRDM1_AB_sao, symmetrize_tRDM(tRDM2_AB_sao)  
+
+    def get_level_shift(self):
+        """
+            find the minimal level shift for CCSD 
+
+        """    
+        pass 
+    
+    def dbg(self, mol):
+
+        from pyscf import cc
+
+        rhf = self.get_RHF(mol) 
+        oao_coeff = get_basis(mol)
+        mo_like_coeff = np.einsum('ij,kj->ik',oao_coeff, self.U_global)  
+
+        rhf.mo_coeff = mo_like_coeff
+        rhf.mo_occ = self.occ_global
+
+        #ccsd = REBCC(rhf, ansatz="CCSD") 
+        
+        #ccsd.kernel()
+        #ccsd.solve_lambda()     
+
+        # pyscf in canonical basis 
+        ccsd_pyscf_can = self.get_RHF(mol).CCSD()
+        #ccsd_pyscf_can.level_shift = 0.25 # Ha
+        ccsd_pyscf_can.kernel() 
+
+        print ('energy from pyscf in canonical basis\n', ccsd_pyscf_can.e_tot) 
+        print ('t1 from pyscf in canonical basis\n', self.get_t1_diag(ccsd_pyscf_can.t1)) 
+
+        ccsd_pyscf = cc.CCSD(rhf)
+        #ccsd_pyscf.level_shift = 1.6
+
+        #ccsd_pyscf.iterative_damping = 2.0
+        #ccsd_pyscf.diis_start_cycle = 3
+        #ccsd_pyscf.diis_space = 5
+
+        ccsd_pyscf.kernel() 
+
+        #print(ccsd_pyscf.e_tot)
+        
+        rdm1_pyscf = ccsd_pyscf.make_rdm1() 
+        rdm2_pyscf = ccsd_pyscf.make_rdm2()  
+
+        ccsd_pyscf_en = self.get_ccsd_comp_en(mol,
+                                              rhf,
+                                              rdm1_pyscf,rdm2_pyscf,mo_like_coeff)
+
+        print('energy from pyscf in comp basis\n', ccsd_pyscf_en) 
+        #print('energy (rdm) from pyscf in comp basis\n', ccsd_pyscf.e_tot)        
+        print ('t1 from pyscf in comp basis\n', self.get_t1_diag(ccsd_pyscf.t1))        
+        
+    def get_fock_comp(self, rhf, sao_coeff:np.ndarray ):
+        
+        # sao_coeff : S^(-1/2)
+        # get Fock matrix in the comp basis at new training geom 
+        from numpy.linalg import eigh
+
+        F_ao = rhf.get_fock() 
+
+        F_sao = sao_coeff @ F_ao @ sao_coeff
+        
+        F_comp = self.U_global @ F_sao @ self.U_global.T 
+
+        print('Fock matrix in comp basis') 
+        print(F_comp[:5,:5])  
+        print('diagonal') 
+        print(np.diag(F_comp)) 
+         
+        # check energy levels 
+        print('energy levels')
+        print(eigh(F_comp)[0])
+        
+
+    def get_t1_diag(self, t1):
+        # t1 diagnostics for CCSD state 
+        import numpy 
+        
+        return numpy.sqrt(numpy.linalg.norm(t1)**2 / self.nelec) 
+    
     def get_ccsd_comp_en(self, 
                          mol, 
                          rhf_comp_geom,  
@@ -264,6 +584,27 @@ class CCSD_EVCont_Obj:
         en += e_nuc
 
         return en  
+
+    def get_mat_sqrt(self, mat):
+
+        from numpy.linalg import eigh
+        
+        val, vec = eigh(mat)
+
+        return  vec @ np.diag( np.sqrt(val) ) @ vec.T.conj()  
+
+    def get_D(self, mol):
+
+        """
+            obtain D i.e. the expansion coefficients in SAO
+        """ 
+        rhf = scf.RHF(mol).run() 
+
+        S = mol.intor_symmetric("int1e_ovlp")    
+        
+        S_sqrt = self.get_mat_sqrt(S )
+        
+        return S_sqrt @ rhf.mo_coeff  
 
     def get_trdm_sym_sao(self, i, num_state, ccsd):
         
@@ -309,7 +650,7 @@ class CCSD_EVCont_Obj:
             
             # impose inter-block symmetry 
             trdm1_sym = 0.5 * (trdm1_ij.T + trdm1_ji) 
-
+            
             # so far so good
             # assignment 
             
@@ -331,22 +672,42 @@ class CCSD_EVCont_Obj:
         
         return np.einsum('abddcc->ab',self.two_rdm)/((self.nelec-1) * self.nelec)  
         
-    def to_sao_1rdm(self, one_rdm):
+    def to_sao_1rdm(self, one_rdm, U = None):
         
         # from MO-like otbs to SAO
-        return np.einsum("ij,ia,jb-> ab", 
-                            one_rdm, 
-                            self.U_global, 
-                            self.U_global, 
-                            optimize="optimal") 
+        if U is None:
+            return np.einsum("ij,ia,jb-> ab", 
+                                one_rdm, 
+                                self.U_global, 
+                                self.U_global, 
+                                optimize="optimal") 
+        else:
+            return np.einsum("ij,ia,jb-> ab", 
+                                one_rdm, 
+                                U, U, 
+                                optimize="optimal")  
 
-    def to_sao_2rdm(self, two_rdm):
+    def to_sao_2rdm(self, two_rdm, U= None):
         
         # 
+        if U is None: 
+            return np.einsum("ijkl,ia,jb,kc,ld->abcd",
+                                two_rdm,
+                                self.U_global, self.U_global,
+                                self.U_global, self.U_global,
+                                optimize="optimal") 
+        else: 
+            return np.einsum("ijkl,ia,jb,kc,ld->abcd",
+                                two_rdm,
+                                U, U, U, U, 
+                                optimize="optimal") 
+
+    def to_mo_2rdm(self,two_rdm):
+        
         return np.einsum("ijkl,ia,jb,kc,ld->abcd",
                             two_rdm,
-                            self.U_global, self.U_global,
-                            self.U_global, self.U_global,
+                            self.U_global.T, self.U_global.T,
+                            self.U_global.T, self.U_global.T,
                             optimize="optimal") 
 
     def get_RHF(self, mol): 
@@ -354,6 +715,9 @@ class CCSD_EVCont_Obj:
         return scf.RHF(mol).run()   
 
     def get_U_global(self, mol):
+        """
+            U = S^(1/2) C 
+        """
         
         comp_geom_rhf = self.get_RHF(self.comp_geom_mol)
 
@@ -390,7 +754,8 @@ class CCSD_EVCont_Obj:
                             t1b=ccsd_j.t1,
                             t2b=ccsd_j.t2,
                         )
-                    
+            #np.save('1rdm_co',self.to_sao_1rdm(trdm1)) 
+
         if '2' in task:    
             trdm2 = make_rdm2_f(
                             l1a=ccsd_i.l1,
@@ -400,8 +765,9 @@ class CCSD_EVCont_Obj:
                             t1b=ccsd_j.t1,
                             t2b=ccsd_j.t2,
                         )
+            #np.save('2rdm_co',self.to_sao_2rdm(trdm2)) 
 
-
+            
         if task == '1':
             return trdm1
 
@@ -420,9 +786,9 @@ class CCSD_EVCont_Obj:
              test_mol, 
              test_geom, 
              pivot,             # x axis, e.g. r_OH 
-             description = 'test',  # description of simulation  
-             task:list = ['ccsd','ccsd-comp-geom','ec-ccsd'] ,
-             lindep = 1e-5,     # curoff of S's eigenvalue, needs to try 
+             data_output = 'test',  # description of simulation  
+             task:list = ['ccsd','ec-ccsd'] ,
+             lindep = 1e-4,     # curoff of S's eigenvalue, needs to try 
              ):
             
         """
@@ -432,6 +798,15 @@ class CCSD_EVCont_Obj:
         ## just make you life easier...
         import json
 
+        get_lambda = lambda x : np.linalg.eigh(x)[0] 
+        
+        print('overlap matrix')
+        print(self.overlap)
+
+        print('eigenvalues of overlap matrix')
+        print(get_lambda(self.overlap))
+    
+        
         t1_diagnostic = lambda t1: np.sqrt(np.linalg.norm(t1)**2 / self.nelec) 
         
         x_axis = [] 
@@ -506,11 +881,46 @@ class CCSD_EVCont_Obj:
         output = {'test_x':x_axis, 
                   'test_en':data, 
                   'train_en':self.train_en, 
-                  'comp_geom_hf_en': self.comp_geom_hf_en 
+                  'comp_geom_hf_en': self.comp_geom_hf_en, 
+                  'comp_geom': self.comp_geom_list,
+                  'train_geom': self.train_geom_list
                   } 
         
-        with open(description+'.json', 'w') as fp: 
+        # also wrap up 
+        
+        with open(data_output+'.json', 'w') as fp: 
             json.dump(output, fp)
         
+    # experimental 
+    def purify(self, max_ite = 50):
+        """
+            only purify the diagonal at this moment
+            
+        """
+        from evcont.purification_utils import get_purified_2rdm 
 
+        self.two_rdm = get_purified_2rdm(self.two_rdm,
+                                         self.norb,
+                                         self.nelec,
+                                         max_ite)
+
+    def get_procrustes(self, A, B):
+    
+        # A as bra, B as ket 
         
+        from scipy.linalg import svd
+
+        #M = A.T @ B 
+        M = B.T @ A 
+        
+        #print ('overlap before', np.diag(M)) 
+
+        U, sigma, Vh = svd(M)
+
+        Q = U @ Vh  
+
+        #print ('overlap after', np.diag( (B @ Q).T @ A ) )  
+
+        return Q  
+    
+    

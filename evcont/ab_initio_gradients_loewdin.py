@@ -439,7 +439,7 @@ def get_energy_with_grad(
     grad_elec = get_grad_elec_OAO(
         mol, one_rdm_predicted, two_rdm_predicted, ao_mo_trafo=ao_mo_trafo
     )
-
+        
     if return_density_matrices:
         return (
             en.real + mol.energy_nuc(),

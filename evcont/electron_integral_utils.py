@@ -14,7 +14,10 @@ def get_loewdin_trafo(overlap_mat):
         ndarray: The transformed matrix.
     """
     vals, vecs = np.linalg.eigh(overlap_mat)
-    inverse_sqrt_vals = np.where(vals > 1.0e-15, 1 / np.sqrt(vals), 0.0)
+    
+    # this threshold could be too small 
+    inverse_sqrt_vals = np.where(vals > 1e-12, 1 / np.sqrt(vals), 0.0)
+
     return np.array(np.dot(vecs * inverse_sqrt_vals, vecs.conj().T))
 
 
@@ -33,7 +36,6 @@ def transform_integrals(h1, h2, trafo):
     h1 = np.einsum("...ij,ai,bj->...ab", h1, trafo, optimize="optimal")
     h2 = np.einsum("...ijkl,ai,bj,ck,dl->...abcd", h2, trafo, optimize="optimal")
     return h1, h2
-
 
 def compress_electron_exchange_symmetry(h2, diag_multiplier=1.0):
     """

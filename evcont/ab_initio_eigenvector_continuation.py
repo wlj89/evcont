@@ -14,7 +14,7 @@ from evcont.low_rank_utils import lowrank_hamiltonian
 
 from pyscf.lib import safe_eigh
 
-def approximate_ground_state(h1, h2, one_RDM, two_RDM, S, hermitian=True, lindep = 1e-5):
+def approximate_ground_state(h1, h2, one_RDM, two_RDM, S, hermitian=True, lindep = 1e-4):
     """
     Returns the electronic ground state approximation from solving the generalised
     eigenvalue problem defined via the one- and two-body transition RDMs.
@@ -169,7 +169,7 @@ def approximate_multistate_lowrank(mol, one_RDM, lowrank_vecs, cum_diagonal, S,
 
     return en_approx, evec_approx
 
-def approximate_multistate(h1, h2, one_RDM, two_RDM, S, nroots=1, hermitian=True, lindep = 1e-5):
+def approximate_multistate(h1, h2, one_RDM, two_RDM, S, nroots=1, hermitian=True, lindep = 1e-4):
     """
     Returns multiple approximate electronic states from solving the generalised
     eigenvalue problem defined via the one- and two-body transition RDMs.
@@ -289,7 +289,7 @@ def approximate_multistate_otf(h1, h2, one_RDM=None, two_RDM=None, S=None, otf_h
     return en_approx, evec_approx
 
 
-def approximate_ground_state_OAO(mol, one_RDM, two_RDM, S, hermitian=True, lindep = 1e-5):
+def approximate_ground_state_OAO(mol, one_RDM, two_RDM, S, hermitian=True, lindep = 1e-4):
     """
     This function approximates the ground state energy and wavefunction of a given
     molecule from an eigenvector continuation with t-RDMS and the overlap matrix S.
@@ -327,7 +327,7 @@ def approximate_ground_state_OAO(mol, one_RDM, two_RDM, S, hermitian=True, linde
     return total_energy, vec
 
 
-def approximate_multistate_OAO(mol, one_RDM, two_RDM, S, nroots=1, hermitian=True, lindep = 1e-5):
+def approximate_multistate_OAO(mol, one_RDM, two_RDM, S, nroots=1, hermitian=True, lindep = 1e-4):
     """
     This function approximates multiple state energies and wavefunctions of a given
     molecule from an eigenvector continuation with t-RDMS and the overlap matrix S.

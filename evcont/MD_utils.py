@@ -131,7 +131,7 @@ def get_scanner(mol, one_rdm, two_rdm, overlap, hermitian=True, calc_dipole = Fa
             self.dipole_t.append(dipole.copy())
             
     return Scanner()
-
+    
     
 def get_trajectory(
     init_mol,
@@ -146,7 +146,7 @@ def get_trajectory(
     energy_output=None,
     data_output = None, 
     calc_dipole = False, 
-    dipole_output = False,
+    dipole_output = None,
     
 ):
     """
